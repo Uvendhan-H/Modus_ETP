@@ -1,0 +1,74 @@
+trigger:
+- main 
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  terraformStateResourceGroup: 'Uv_test'
+  terraformStateStorageAccount: 'terraformstateuv'
+  terraformStateContainer: 'terraform'
+  terraformStateFile: 'terraform.tfstate'
+
+steps:
+# Terraform Initialization
+- task: TerraformTaskV2@2
+  inputs:
+    provider: 'azurerm'
+    command: 'init'
+    backendServiceArm: 'AzureServiceConnection'
+    backendAzureRmResourceGroupName: $(terraformStateResourceGroup)
+    backendAzureRmStorageAccountName: $(terraformStateStorageAccount)
+    backendAzureRmContainerName: $(terraformStateContainer)
+    backendAzureRmKey: $(terraformStateFile)
+
+# Terraform Validation
+- task: TerraformTaskV2@2
+  inputs:
+    provider: 'azurerm'
+    command: 'validate'
+    environmentServiceNameAzureRM: 'AzureServiceConnection'
+
+# Terraform Plan
+- task: TerraformTaskV2@2
+  inputs:
+    provider: 'azurerm'
+    command: 'plan'
+    environmentServiceNameAzureRM: 'AzureServiceConnection'
+
+# Terraform Apply
+- task: TerraformTaskV2@2
+  inputs:
+    provider: 'azurerm'
+    command: 'apply'
+    environmentServiceNameAzureRM: 'AzureServiceConnection'
+
+# Application Deployment to Azure App Service
+- task: AzureWebApp@1
+  inputs:
+    azureSubscription: 'AzureServiceConnection'
+    appName: 'testing1-app-service'
+    package: '$(Build.ArtifactStagingDirectory)/app.zip'
+
+# Validate Artifact Before Deployment
+- script: |
+    if [ ! -f "$(Build.ArtifactStagingDirectory)/app.zip" ]; then
+      echo "❌ Deployment artifact not found!"
+      exit 1
+    fi
+  displayName: 'Verify Application Artifact'
+
+# Integration with External Services (APIM)
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'AzureServiceConnection'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      az apim api create --resource-group Uv_test \
+      --service-name inter1-apim \
+      --name MyExternalAPI \
+      --path /myapi \
+      --display-name "My External API" \
+      --subscription-required false \
+      --protocols https
